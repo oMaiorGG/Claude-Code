@@ -1,0 +1,281 @@
+import { useState } from 'react';
+import { useApp } from '@/context/AppContext';
+import { contactData } from '@/data/mockData';
+import StatusBadge from '@/components/StatusBadge';
+import Modal from '@/components/Modal';
+import EmptyState from '@/components/EmptyState';
+import { Mail, Phone, MapPin, Pencil, MessageSquare, Send, CheckCircle2, LogOut, CalendarCheck } from 'lucide-react';
+
+interface ProfilePageProps {
+  onBack: () => void;
+}
+
+type ProfileTab = 'dados' | 'inscricoes';
+
+export default function ProfilePage({ onBack }: ProfilePageProps) {
+  const { getCurrentMember, getCurrentMemberQuota, activities, registrations, updateMember, logout } = useApp();
+  const member = getCurrentMember();
+  const quota = getCurrentMemberQuota();
+
+  const [tab, setTab] = useState<ProfileTab>('dados');
+  const [editOpen, setEditOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactSent, setContactSent] = useState(false);
+  const [editForm, setEditForm] = useState({
+    email: member?.email ?? '',
+    telemovel: member?.telemovel ?? '',
+  });
+  const [contactForm, setContactForm] = useState({ subject: '', message: '' });
+
+  if (!member) return null;
+
+  const myRegistrations = registrations
+    .filter((r) => r.associadoId === member.id && r.estado !== 'cancelado')
+    .map((r) => ({ registration: r, activity: activities.find((a) => a.id === r.atividadeId) }))
+    .filter((r) => r.activity);
+
+  const handleSaveEdit = () => {
+    updateMember(member.id, { email: editForm.email, telemovel: editForm.telemovel });
+    setEditOpen(false);
+  };
+
+  const handleSendContact = () => {
+    setContactSent(true);
+    setContactForm({ subject: '', message: '' });
+    setTimeout(() => {
+      setContactSent(false);
+      setContactOpen(false);
+    }, 2000);
+  };
+
+  return (
+    <div className="animate-fade-in">
+      <div className="px-5 pt-6 pb-6 text-center">
+        <div className="w-20 h-20 rounded-full bg-brand-700 border border-gold-500/30
+                        flex items-center justify-center mx-auto mb-4">
+          <span className="font-serif text-2xl font-semibold text-gold-200">
+            {member.avatarInitials}
+          </span>
+        </div>
+        <h1 className="font-serif text-2xl font-semibold text-white">{member.nomeCompleto}</h1>
+        <p className="text-sm text-ink-400 mt-1">Associado Nº {member.numeroAssociado}</p>
+        <div className="mt-3">
+          <StatusBadge variant={member.estadoAssociado} label="Associado Ativo" />
+        </div>
+      </div>
+
+      <div className="px-5 mb-5">
+        <div className="flex gap-2 p-1 rounded-xl bg-brand-900/60 border border-brand-700/40">
+          <button
+            onClick={() => setTab('dados')}
+            className={`flex-1 py-2 rounded-lg text-xs font-semibold tracking-wide transition-colors
+              ${tab === 'dados' ? 'bg-gold-500 text-brand-950' : 'text-ink-300 hover:text-white'}`}
+          >
+            Meus Dados
+          </button>
+          <button
+            onClick={() => setTab('inscricoes')}
+            className={`flex-1 py-2 rounded-lg text-xs font-semibold tracking-wide transition-colors
+              ${tab === 'inscricoes' ? 'bg-gold-500 text-brand-950' : 'text-ink-300 hover:text-white'}`}
+          >
+            As Minhas Inscrições
+          </button>
+        </div>
+      </div>
+
+      {tab === 'dados' ? (
+        <>
+          <div className="px-5 mb-6">
+            <div className="card-surface p-5">
+              <p className="section-title mb-4">Os Meus Dados</p>
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <Pencil className="w-4 h-4 text-ink-500 shrink-0" />
+                  <div className="flex-1">
+                    <p className="field-label">Nome</p>
+                    <p className="field-value">{member.nomeCompleto}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Mail className="w-4 h-4 text-ink-500 shrink-0" />
+                  <div className="flex-1">
+                    <p className="field-label">Email</p>
+                    <p className="field-value">{member.email}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Phone className="w-4 h-4 text-ink-500 shrink-0" />
+                  <div className="flex-1">
+                    <p className="field-label">Telemóvel</p>
+                    <p className="field-value">{member.telemovel}</p>
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-ink-500 mt-4 italic">
+                O nome, número de associado e estado são geridos pela ACB. Pode atualizar o email e telemóvel.
+              </p>
+              <button onClick={() => setEditOpen(true)} className="btn-secondary mt-5">
+                Editar Dados
+              </button>
+            </div>
+          </div>
+
+          {quota && (
+            <div className="px-5 mb-6">
+              <div className="card-surface p-5">
+                <p className="section-title mb-4">Estado da Associação</p>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm text-ink-400">Quota {quota.ano}</span>
+                  <StatusBadge variant={quota.estado} />
+                </div>
+                <p className="text-xs text-ink-500">Válida até {quota.dataFim}</p>
+              </div>
+            </div>
+          )}
+
+          <div className="px-5 mb-8">
+            <div className="card-surface p-5">
+              <p className="section-title mb-4">Contacto ACB</p>
+              <div className="space-y-3 mb-4">
+                <div className="flex items-start gap-3 text-sm">
+                  <Phone className="w-4 h-4 text-ink-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="field-label">Telefone</p>
+                    <p className="text-ink-200">{contactData.phone}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 text-sm">
+                  <Mail className="w-4 h-4 text-ink-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="field-label">Email</p>
+                    <p className="text-ink-200">{contactData.email}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 text-sm">
+                  <MapPin className="w-4 h-4 text-ink-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="field-label">Morada</p>
+                    <p className="text-ink-200">{contactData.address}</p>
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setContactOpen(true)} className="btn-primary">
+                Contactar ACB
+              </button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="px-5 mb-8 space-y-3">
+          {myRegistrations.length === 0 ? (
+            <EmptyState
+              icon={CalendarCheck}
+              title="Ainda sem inscrições"
+              message="As atividades em que se inscrever aparecem aqui."
+            />
+          ) : (
+            myRegistrations.map(({ registration, activity }) => (
+              <div key={registration.id} className="card-surface p-4">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="font-serif text-base font-semibold text-white">{activity!.titulo}</p>
+                  <StatusBadge variant={registration.estado} size="sm" />
+                </div>
+                <p className="text-xs text-ink-400">{activity!.data} · {activity!.hora} · {activity!.local}</p>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      <div className="px-5 pb-4 space-y-2">
+        <button onClick={onBack} className="btn-ghost">
+          Voltar
+        </button>
+        <button
+          onClick={logout}
+          className="flex items-center justify-center gap-2 w-full py-3 text-sm font-medium
+                     text-red-300/80 hover:text-red-300 transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+          Terminar Sessão
+        </button>
+      </div>
+
+      <Modal open={editOpen} onClose={() => setEditOpen(false)}>
+        <h2 className="font-serif text-xl font-semibold text-white mb-5">Editar Dados</h2>
+        <div className="space-y-4">
+          <div>
+            <label className="field-label block mb-1.5">Email</label>
+            <input
+              type="email"
+              value={editForm.email}
+              onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+              className="w-full px-4 py-3 rounded-xl bg-brand-800 border border-brand-600/40
+                         text-white text-sm outline-none focus:border-gold-500/50 transition-colors"
+            />
+          </div>
+          <div>
+            <label className="field-label block mb-1.5">Telemóvel</label>
+            <input
+              type="tel"
+              value={editForm.telemovel}
+              onChange={(e) => setEditForm({ ...editForm, telemovel: e.target.value })}
+              className="w-full px-4 py-3 rounded-xl bg-brand-800 border border-brand-600/40
+                         text-white text-sm outline-none focus:border-gold-500/50 transition-colors"
+            />
+          </div>
+          <button onClick={handleSaveEdit} className="btn-primary">
+            Guardar
+          </button>
+        </div>
+      </Modal>
+
+      <Modal open={contactOpen} onClose={() => setContactOpen(false)}>
+        {contactSent ? (
+          <div className="flex flex-col items-center text-center py-8 animate-fade-in">
+            <CheckCircle2 className="w-16 h-16 text-emerald-400 mb-4" />
+            <h2 className="font-serif text-xl font-semibold text-white mb-2">Mensagem Enviada</h2>
+            <p className="text-sm text-ink-400">A sua mensagem foi enviada (demonstração).</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 mb-5">
+              <MessageSquare className="w-5 h-5 text-gold-300" />
+              <h2 className="font-serif text-xl font-semibold text-white">Contactar ACB</h2>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="field-label block mb-1.5">Assunto</label>
+                <input
+                  type="text"
+                  value={contactForm.subject}
+                  onChange={(e) => setContactForm({ ...contactForm, subject: e.target.value })}
+                  placeholder="Assunto da mensagem"
+                  className="w-full px-4 py-3 rounded-xl bg-brand-800 border border-brand-600/40
+                             text-white text-sm outline-none focus:border-gold-500/50 transition-colors
+                             placeholder:text-ink-600"
+                />
+              </div>
+              <div>
+                <label className="field-label block mb-1.5">Mensagem</label>
+                <textarea
+                  value={contactForm.message}
+                  onChange={(e) => setContactForm({ ...contactForm, message: e.target.value })}
+                  placeholder="Escreva a sua mensagem"
+                  rows={4}
+                  className="w-full px-4 py-3 rounded-xl bg-brand-800 border border-brand-600/40
+                             text-white text-sm outline-none focus:border-gold-500/50 transition-colors
+                             placeholder:text-ink-600 resize-none"
+                />
+              </div>
+              <button onClick={handleSendContact} className="btn-primary flex items-center justify-center gap-2">
+                <Send className="w-4 h-4" />
+                Enviar
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
+    </div>
+  );
+}
