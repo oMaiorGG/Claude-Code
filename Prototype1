@@ -1,0 +1,1017 @@
+src/context/AppContext.tsx (substitui inteiro — adiciona sessão persistente)
+
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import type {
+  Member,
+  Quota,
+  Activity,
+  ActivityRegistration,
+  Benefit,
+  Notification,
+  AuthUser,
+} from '@/types';
+import {
+  membersData,
+  quotasData,
+  activitiesData,
+  registrationsData,
+  benefitsData,
+  notificationsData,
+  DEMO_MEMBER_ID,
+  DEMO_MEMBER_EMAIL,
+  DEMO_ADMIN_EMAIL,
+} from '@/data/mockData';
+
+const SESSION_KEY = 'acb_session';
+
+function readStoredSession(): { email: string } | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(email: string, remember: boolean) {
+  try {
+    const payload = JSON.stringify({ email });
+    if (remember) {
+      localStorage.setItem(SESSION_KEY, payload);
+      sessionStorage.removeItem(SESSION_KEY);
+    } else {
+      sessionStorage.setItem(SESSION_KEY, payload);
+      localStorage.removeItem(SESSION_KEY);
+    }
+  } catch {
+    // armazenamento indisponível (ex. navegação privada) — sessão simplesmente não persiste
+  }
+}
+
+function clearStoredSession() {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+interface AppContextValue {
+  // Auth
+  currentUser: AuthUser | null;
+  login: (email: string, remember?: boolean) => boolean;
+  logout: () => void;
+
+  // Data
+  members: Member[];
+  quotas: Quota[];
+  activities: Activity[];
+  registrations: ActivityRegistration[];
+  benefits: Benefit[];
+  notifications: Notification[];
+
+  // Member mutations
+  updateMember: (id: string, updates: Partial<Member>) => void;
+  setMemberStatus: (id: string, status: Member['estadoAssociado']) => void;
+  createMember: (member: Member) => void;
+
+  // Quota mutations
+  updateQuotaStatus: (quotaId: string, estado: Quota['estado']) => void;
+  updateQuotaValor: (quotaId: string, valor: number) => void;
+
+  // Activity mutations
+  createActivity: (activity: Activity) => void;
+  updateActivity: (id: string, updates: Partial<Activity>) => void;
+  setActivityRegistrationStatus: (id: string, status: Activity['estadoInscricoes']) => void;
+  registerForActivity: (activityId: string, memberId: string) => void;
+  cancelRegistration: (registrationId: string) => void;
+  getMemberRegistration: (activityId: string, memberId: string) => ActivityRegistration | undefined;
+
+  // Benefit mutations
+  createBenefit: (benefit: Benefit) => void;
+  updateBenefit: (id: string, updates: Partial<Benefit>) => void;
+  setBenefitStatus: (id: string, estado: Benefit['estado']) => void;
+
+  // Notification mutations
+  createNotification: (notif: Notification) => void;
+  toggleNotificationPublished: (id: string) => void;
+
+  // Helpers
+  getCurrentMember: () => Member | undefined;
+  getCurrentMemberQuota: () => Quota | undefined;
+}
+
+const AppContext = createContext<AppContextValue | null>(null);
+
+export function AppProvider({ children }: { children: ReactNode }) {
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [members, setMembers] = useState<Member[]>([...membersData]);
+  const [quotas, setQuotas] = useState<Quota[]>([...quotasData]);
+  const [activities, setActivities] = useState<Activity[]>([...activitiesData]);
+  const [registrations, setRegistrations] = useState<ActivityRegistration[]>([...registrationsData]);
+  const [benefits, setBenefits] = useState<Benefit[]>([...benefitsData]);
+  const [notifications, setNotifications] = useState<Notification[]>([...notificationsData]);
+
+  const resolveUser = useCallback((email: string): AuthUser | null => {
+    const lower = email.toLowerCase().trim();
+    if (lower === DEMO_ADMIN_EMAIL) {
+      return { id: 'adm-001', nome: 'Administrador ACB', email: lower, role: 'admin' };
+    }
+    const member = members.find((m) => m.email.toLowerCase() === lower);
+    if (member) {
+      return { id: member.id, nome: member.nomeCompleto, email: member.email, role: 'member', memberRef: member.id };
+    }
+    return null;
+  }, [members]);
+
+  useEffect(() => {
+    const stored = readStoredSession();
+    if (stored) {
+      const user = resolveUser(stored.email);
+      if (user) setCurrentUser(user);
+    }
+    // apenas na montagem inicial
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const login = useCallback((email: string, remember = false): boolean => {
+    const user = resolveUser(email);
+    if (!user) return false;
+    setCurrentUser(user);
+    writeStoredSession(user.email, remember);
+    return true;
+  }, [resolveUser]);
+
+  const logout = useCallback(() => {
+    setCurrentUser(null);
+    clearStoredSession();
+  }, []);
+
+  const updateMember = useCallback((id: string, updates: Partial<Member>) => {
+    setMembers((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
+  }, []);
+
+  const setMemberStatus = useCallback((id: string, status: Member['estadoAssociado']) => {
+    updateMember(id, { estadoAssociado: status });
+  }, [updateMember]);
+
+  const createMember = useCallback((member: Member) => {
+    setMembers((prev) => [...prev, member]);
+  }, []);
+
+  const updateQuotaStatus = useCallback((quotaId: string, estado: Quota['estado']) => {
+    setQuotas((prev) => prev.map((q) => {
+      if (q.id !== quotaId) return q;
+      return {
+        ...q,
+        estado,
+        dataPagamento: estado === 'regularizada' ? new Date().toISOString().split('T')[0] : null,
+      };
+    }));
+  }, []);
+
+  const updateQuotaValor = useCallback((quotaId: string, valor: number) => {
+    setQuotas((prev) => prev.map((q) => (q.id === quotaId ? { ...q, valor } : q)));
+  }, []);
+
+  const createActivity = useCallback((activity: Activity) => {
+    setActivities((prev) => [...prev, activity]);
+  }, []);
+
+  const updateActivity = useCallback((id: string, updates: Partial<Activity>) => {
+    setActivities((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
+  }, []);
+
+  const setActivityRegistrationStatus = useCallback((id: string, status: Activity['estadoInscricoes']) => {
+    updateActivity(id, { estadoInscricoes: status });
+  }, [updateActivity]);
+
+  const registerForActivity = useCallback((activityId: string, memberId: string) => {
+    const existing = registrations.find(
+      (r) => r.atividadeId === activityId && r.associadoId === memberId && r.estado === 'inscrito'
+    );
+    if (existing) return;
+
+    const activity = activities.find((a) => a.id === activityId);
+    if (!activity) return;
+
+    const estado = activity.numeroInscritos >= activity.limiteParticipantes
+      ? 'lista_espera'
+      : 'inscrito';
+
+    const newReg: ActivityRegistration = {
+      id: `reg-${Date.now()}`,
+      atividadeId: activityId,
+      associadoId: memberId,
+      dataInscricao: new Date().toISOString().split('T')[0],
+      estado,
+    };
+    setRegistrations((prev) => [...prev, newReg]);
+
+    const newCount = activity.numeroInscritos + 1;
+    setActivities((prev) => prev.map((a) =>
+      a.id === activityId
+        ? {
+            ...a,
+            numeroInscritos: newCount,
+            estadoInscricoes: newCount >= a.limiteParticipantes ? 'full' : a.estadoInscricoes,
+          }
+        : a
+    ));
+  }, [activities, registrations]);
+
+  const cancelRegistration = useCallback((registrationId: string) => {
+    setRegistrations((prev) => {
+      const reg = prev.find((r) => r.id === registrationId);
+      if (reg) {
+        const activity = activities.find((a) => a.id === reg.atividadeId);
+        if (activity) {
+          const newCount = Math.max(0, activity.numeroInscritos - 1);
+          setActivities((acts) => acts.map((a) =>
+            a.id === reg.atividadeId
+              ? {
+                  ...a,
+                  numeroInscritos: newCount,
+                  estadoInscricoes: a.estadoInscricoes === 'full' && newCount < a.limiteParticipantes
+                    ? 'open'
+                    : a.estadoInscricoes,
+                }
+              : a
+          ));
+        }
+      }
+      return prev.map((r) => (r.id === registrationId ? { ...r, estado: 'cancelado' as const } : r));
+    });
+  }, [activities]);
+
+  const getMemberRegistration = useCallback((activityId: string, memberId: string) => {
+    return registrations.find(
+      (r) => r.atividadeId === activityId && r.associadoId === memberId && r.estado === 'inscrito'
+    );
+  }, [registrations]);
+
+  const createBenefit = useCallback((benefit: Benefit) => {
+    setBenefits((prev) => [...prev, benefit]);
+  }, []);
+
+  const updateBenefit = useCallback((id: string, updates: Partial<Benefit>) => {
+    setBenefits((prev) => prev.map((b) => (b.id === id ? { ...b, ...updates } : b)));
+  }, []);
+
+  const setBenefitStatus = useCallback((id: string, estado: Benefit['estado']) => {
+    updateBenefit(id, { estado });
+  }, [updateBenefit]);
+
+  const createNotification = useCallback((notif: Notification) => {
+    setNotifications((prev) => [...prev, notif]);
+  }, []);
+
+  const toggleNotificationPublished = useCallback((id: string) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, publicada: !n.publicada } : n)));
+  }, []);
+
+  const getCurrentMember = useCallback(() => {
+    if (!currentUser || currentUser.role !== 'member') return undefined;
+    return members.find((m) => m.id === currentUser.memberRef);
+  }, [currentUser, members]);
+
+  const getCurrentMemberQuota = useCallback(() => {
+    const member = getCurrentMember();
+    if (!member) return undefined;
+    const year = new Date().getFullYear();
+    return quotas.find((q) => q.associadoId === member.id && q.ano === year);
+  }, [getCurrentMember, quotas]);
+
+  const value: AppContextValue = {
+    currentUser,
+    login,
+    logout,
+    members,
+    quotas,
+    activities,
+    registrations,
+    benefits,
+    notifications,
+    updateMember,
+    setMemberStatus,
+    createMember,
+    updateQuotaStatus,
+    updateQuotaValor,
+    createActivity,
+    updateActivity,
+    setActivityRegistrationStatus,
+    registerForActivity,
+    cancelRegistration,
+    getMemberRegistration,
+    createBenefit,
+    updateBenefit,
+    setBenefitStatus,
+    createNotification,
+    toggleNotificationPublished,
+    getCurrentMember,
+    getCurrentMemberQuota,
+  };
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+}
+
+export function useApp() {
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useApp must be used within AppProvider');
+  return ctx;
+}
+
+
+(DEMO_MEMBER_ID fica sem uso agora — podes remover do import se o linter reclamar, ou ignorar.)
+src/pages/LoginPage.tsx (substitui inteiro)
+
+import { useState } from 'react';
+import { useApp } from '@/context/AppContext';
+import { DEMO_MEMBER_EMAIL, DEMO_ADMIN_EMAIL } from '@/data/mockData';
+import { Lock, Mail, LogIn } from 'lucide-react';
+
+interface LoginPageProps {
+  onSuccess: () => void;
+}
+
+export default function LoginPage({ onSuccess }: LoginPageProps) {
+  const { login } = useApp();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(true);
+  const [error, setError] = useState('');
+  const [forgotNotice, setForgotNotice] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setForgotNotice(false);
+    if (!email || !password) {
+      setError('Preencha todos os campos.');
+      return;
+    }
+    const success = login(email, remember);
+    if (success) {
+      onSuccess();
+    } else {
+      setError('Email não encontrado. Use os dados de demonstração.');
+    }
+  };
+
+  const fillDemo = (demoEmail: string) => {
+    setEmail(demoEmail);
+    setPassword('demo1234');
+    setError('');
+  };
+
+  return (
+    <div className="page-container flex flex-col items-center justify-center px-6 py-8">
+      <div className="w-full max-w-sm animate-fade-in">
+        <div className="text-center mb-8">
+          <div className="inline-flex flex-col items-center">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-700 to-brand-900
+                            border border-gold-500/30 flex items-center justify-center mb-4">
+              <span className="font-serif text-2xl font-bold text-gold-300">ACB</span>
+            </div>
+            <h1 className="font-serif text-2xl font-semibold text-white">Espaço ACB</h1>
+            <p className="text-xs tracking-[0.2em] uppercase text-ink-500 mt-1.5">
+              Casa do Brasil · Viseu
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="field-label block mb-1.5">Email</label>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-500" />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="o.seu.email@exemplo.com"
+                className="w-full pl-10 pr-4 py-3 rounded-xl bg-brand-900 border border-brand-700/40
+                           text-white text-sm outline-none focus:border-gold-500/50 transition-colors
+                           placeholder:text-ink-600"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="field-label block mb-1.5">Palavra-passe</label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-500" />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full pl-10 pr-4 py-3 rounded-xl bg-brand-900 border border-brand-700/40
+                           text-white text-sm outline-none focus:border-gold-500/50 transition-colors
+                           placeholder:text-ink-600"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-2 text-xs text-ink-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+                className="w-3.5 h-3.5 rounded border-brand-600 bg-brand-800 accent-gold-500"
+              />
+              Manter sessão iniciada
+            </label>
+            <button
+              type="button"
+              onClick={() => setForgotNotice(true)}
+              className="text-xs text-gold-300 hover:text-gold-200 transition-colors"
+            >
+              Esqueceu-se da palavra-passe?
+            </button>
+          </div>
+
+          {forgotNotice && (
+            <p className="text-xs text-ink-400 text-center bg-brand-900/60 border border-brand-700/40 rounded-lg p-3">
+              Por agora, contacte a ACB para repor a sua palavra-passe.
+            </p>
+          )}
+
+          {error && (
+            <p className="text-xs text-red-400 text-center">{error}</p>
+          )}
+
+          <button type="submit" className="btn-primary flex items-center justify-center gap-2">
+            <LogIn className="w-4 h-4" />
+            Entrar
+          </button>
+        </form>
+
+        <p className="text-xs text-ink-500 text-center mt-6">
+          Ainda não tem conta? <span className="text-gold-300">Contacte a ACB</span>
+        </p>
+
+        <div className="mt-8 space-y-2">
+          <p className="text-xs text-ink-500 text-center mb-3">Dados de demonstração — clique para preencher:</p>
+          <button
+            onClick={() => fillDemo(DEMO_MEMBER_EMAIL)}
+            className="card-surface p-3 w-full text-left transition-all hover:border-gold-500/30"
+          >
+            <p className="text-xs font-medium text-gold-300">Associado</p>
+            <p className="text-xs text-ink-400 mt-0.5">{DEMO_MEMBER_EMAIL}</p>
+          </button>
+          <button
+            onClick={() => fillDemo(DEMO_ADMIN_EMAIL)}
+            className="card-surface p-3 w-full text-left transition-all hover:border-gold-500/30"
+          >
+            <p className="text-xs font-medium text-gold-300">Administrador</p>
+            <p className="text-xs text-ink-400 mt-0.5">{DEMO_ADMIN_EMAIL}</p>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+src/components/QRCode.tsx (substitui inteiro — expõe o PNG gerado)
+
+import { useEffect, useState } from 'react';
+import QRCodeLib from 'qrcode';
+
+interface QRCodeProps {
+  value: string;
+  size?: number;
+  className?: string;
+  onGenerated?: (dataUrl: string) => void;
+}
+
+export default function QRCode({ value, size = 120, className = '', onGenerated }: QRCodeProps) {
+  const [dataUrl, setDataUrl] = useState<string>('');
+
+  useEffect(() => {
+    QRCodeLib.toDataURL(value, {
+      width: size * 2,
+      margin: 1,
+      color: { dark: '#1e1e1b', light: '#ffffff' },
+      errorCorrectionLevel: 'M',
+    })
+      .then((url) => {
+        setDataUrl(url);
+        onGenerated?.(url);
+      })
+      .catch(() => setDataUrl(''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, size]);
+
+  return (
+    <div className={`relative inline-block ${className}`} style={{ width: size, height: size }}>
+      <div className="absolute inset-0 bg-white rounded-lg p-1.5">
+        {dataUrl ? (
+          <img src={dataUrl} alt="QR Code" width={size - 12} height={size - 12} className="block rounded" />
+        ) : (
+          <div className="w-full h-full bg-ink-200/20 rounded animate-pulse" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+src/components/MembershipCard.tsx (substitui inteiro)
+
+import type { Member, Quota } from '@/types';
+import StatusBadge from './StatusBadge';
+import QRCode from './QRCode';
+
+interface MembershipCardProps {
+  member: Member;
+  quota?: Quota;
+  variant?: 'full' | 'compact';
+  onPress?: () => void;
+  onQrGenerated?: (dataUrl: string) => void;
+}
+
+export default function MembershipCard({ member, quota, variant = 'full', onPress, onQrGenerated }: MembershipCardProps) {
+  const isCompact = variant === 'compact';
+  const year = quota?.ano ?? new Date().getFullYear();
+  const validUntil = quota?.dataFim ?? `31/12/${year}`;
+  const qrValue = `https://acb-viseu.pt/c/${member.cardToken}`;
+
+  return (
+    <button
+      onClick={onPress}
+      disabled={!onPress}
+      className={`group relative w-full text-left overflow-hidden rounded-2xl
+        bg-gradient-to-br from-brand-800 via-brand-900 to-brand-950
+        shadow-2xl shadow-black/40
+        transition-all duration-300 ${onPress ? 'active:scale-[0.98] hover:shadow-black/50' : ''}
+        ${isCompact ? 'p-1.5' : 'p-2'}`}
+    >
+      <div className={`relative rounded-xl border border-gold-500/25 overflow-hidden
+                      ${isCompact ? 'p-4' : 'p-6'}`}>
+
+        <div className="absolute inset-[3px] rounded-lg border border-gold-500/10 pointer-events-none" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-24 bg-gold-500/8 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute top-0 right-0 w-28 h-28 bg-gold-500/5 rounded-full -mr-14 -mt-14 pointer-events-none" />
+        <div className="absolute bottom-0 left-0 w-20 h-20 bg-gold-500/5 rounded-full -ml-10 -mb-10 pointer-events-none" />
+
+        <div className="relative flex items-start justify-between mb-5">
+          <div>
+            <p className="font-serif font-semibold text-gold-300 tracking-wide leading-none"
+               style={{ fontSize: isCompact ? '1rem' : '1.125rem' }}>
+              Casa do Brasil
+            </p>
+            <p className="font-serif text-xs text-gold-400/60 tracking-[0.3em] uppercase mt-1.5">
+              Viseu
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            {isCompact ? (
+              <StatusBadge variant={member.estadoAssociado} size="sm" label="Ativo" />
+            ) : (
+              <StatusBadge variant={member.estadoAssociado} />
+            )}
+          </div>
+        </div>
+
+        <div className="relative flex items-center gap-3 mb-5">
+          <div className="flex-1 h-px bg-gradient-to-r from-transparent via-gold-500/30 to-gold-500/30" />
+          <p className="text-[9px] font-medium tracking-[0.25em] uppercase text-gold-400/50 whitespace-nowrap">
+            Cartão de Associado
+          </p>
+          <div className="flex-1 h-px bg-gradient-to-l from-transparent via-gold-500/30 to-gold-500/30" />
+        </div>
+
+        <div className={`relative flex ${isCompact ? 'items-center justify-between' : 'items-end justify-between gap-4'}`}>
+          <div className="min-w-0 flex-1">
+            <p className={`font-serif ${isCompact ? 'text-xl' : 'text-2xl'} font-semibold text-white truncate`}>
+              {member.nomeCompleto}
+            </p>
+            <p className="text-xs tracking-wide text-ink-400 mt-1.5">
+              Associado Nº <span className="text-gold-300 font-semibold">{member.numeroAssociado}</span>
+            </p>
+            {!isCompact && (
+              <div className="mt-3 space-y-0.5">
+                <p className="text-xs tracking-wide text-ink-500">
+                  Validade: <span className="text-ink-300">{validUntil}</span>
+                </p>
+              </div>
+            )}
+          </div>
+
+          {isCompact ? (
+            <div className="flex items-baseline gap-1 shrink-0 ml-3">
+              <span className="font-serif text-3xl font-bold text-gold-400/25">{year}</span>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2 shrink-0">
+              <QRCode value={qrValue} size={88} onGenerated={onQrGenerated} />
+              <span className="font-serif text-2xl font-bold text-gold-400/25">{year}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+src/pages/CardPage.tsx (substitui a versão anterior)
+
+import { useState, useCallback } from 'react';
+import { useApp } from '@/context/AppContext';
+import MembershipCard from '@/components/MembershipCard';
+import StatusBadge from '@/components/StatusBadge';
+import { Wallet, Download } from 'lucide-react';
+
+interface CardPageProps {
+  onBack: () => void;
+}
+
+export default function CardPage({ onBack }: CardPageProps) {
+  const { getCurrentMember, getCurrentMemberQuota } = useApp();
+  const member = getCurrentMember();
+  const quota = getCurrentMemberQuota();
+  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [walletNotice, setWalletNotice] = useState(false);
+
+  const handleQrGenerated = useCallback((dataUrl: string) => setQrDataUrl(dataUrl), []);
+
+  if (!member) return null;
+
+  const year = quota?.ano ?? new Date().getFullYear();
+  const validUntil = quota?.dataFim ?? `31/12/${year}`;
+
+  const handleDownload = () => {
+    if (!qrDataUrl) return;
+    const link = document.createElement('a');
+    link.href = qrDataUrl;
+    link.download = `cartao-acb-${member.numeroAssociado}.png`;
+    link.click();
+  };
+
+  return (
+    <div className="animate-fade-in px-5 pt-8 pb-8">
+      <div className="flex flex-col items-center">
+        <div className="w-full max-w-sm">
+          <MembershipCard member={member} quota={quota} variant="full" onQrGenerated={handleQrGenerated} />
+        </div>
+
+        <p className="text-center text-sm text-ink-400 mt-6 px-6 leading-relaxed max-w-xs">
+          Este cartão identifica-o como associado da Casa do Brasil de Viseu.
+          Apresente-o para usufruir dos benefícios exclusivos dos associados.
+        </p>
+
+        <div className="mt-6 w-full max-w-sm space-y-2">
+          <button
+            onClick={() => setWalletNotice(true)}
+            className="btn-secondary flex items-center justify-center gap-2"
+          >
+            <Wallet className="w-4 h-4" />
+            Adicionar à Apple Wallet
+          </button>
+          {walletNotice && (
+            <p className="text-xs text-ink-500 text-center bg-brand-900/60 border border-brand-700/40 rounded-lg p-3">
+              Disponível numa próxima fase.
+            </p>
+          )}
+          <button
+            onClick={handleDownload}
+            disabled={!qrDataUrl}
+            className="btn-secondary flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            Descarregar QR Code
+          </button>
+        </div>
+
+        <div className="mt-6 w-full max-w-sm card-surface p-5">
+          <p className="section-title mb-4">Informações do Cartão</p>
+          <div className="space-y-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-ink-400">Estado</span>
+              <StatusBadge variant={member.estadoAssociado} size="sm" />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-ink-400">Ano</span>
+              <span className="text-white font-medium">{year}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-ink-400">Validade</span>
+              <span className="text-white font-medium">{validUntil}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-ink-400">Token</span>
+              <span className="text-white font-medium font-mono text-xs">{member.cardToken}</span>
+            </div>
+          </div>
+          <p className="text-xs text-ink-500 mt-4">
+            O QR Code contém apenas um link seguro — não inclui dados pessoais.
+          </p>
+        </div>
+
+        <div className="mt-6 w-full max-w-sm">
+          <button onClick={onBack} className="btn-secondary">
+            Voltar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+src/pages/AdminDashboardPage.tsx (novo ficheiro)
+
+import { useMemo, useState } from 'react';
+import { useApp } from '@/context/AppContext';
+import AdminSidebar, { type AdminPage } from '@/components/AdminSidebar';
+import StatusBadge from '@/components/StatusBadge';
+import SearchBar from '@/components/SearchBar';
+import { Users, CreditCard, CalendarDays, Bell as BellIcon, Gift, Menu } from 'lucide-react';
+
+interface AdminDashboardPageProps {
+  onLogout: () => void;
+}
+
+function KpiCard({ label, value, icon: Icon }: { label: string; value: number | string; icon: typeof Users }) {
+  return (
+    <div className="card-surface p-4 flex items-center gap-3">
+      <div className="w-10 h-10 rounded-lg bg-gold-500/10 flex items-center justify-center shrink-0">
+        <Icon className="w-5 h-5 text-gold-300" />
+      </div>
+      <div>
+        <p className="font-serif text-2xl font-semibold text-white leading-none">{value}</p>
+        <p className="text-xs text-ink-400 mt-1">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+export default function AdminDashboardPage({ onLogout }: AdminDashboardPageProps) {
+  const { members, quotas, activities, logout: appLogout } = useApp();
+  const [current, setCurrent] = useState<AdminPage>('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [search, setSearch] = useState('');
+
+  const handleLogout = () => {
+    appLogout();
+    onLogout();
+  };
+
+  const totalAssociados = members.length;
+  const ativos = members.filter((m) => m.estadoAssociado === 'active').length;
+  const quotasPendentes = quotas.filter((q) => q.estado === 'pendente' || q.estado === 'vencida').length;
+  const proximasAtividades = activities.filter((a) => a.estadoInscricoes !== 'closed').length;
+
+  const currentYear = new Date().getFullYear();
+  const quotaByMember = useMemo(() => {
+    const map = new Map<string, (typeof quotas)[number]>();
+    quotas.forEach((q) => {
+      if (q.ano === currentYear) map.set(q.associadoId, q);
+    });
+    return map;
+  }, [quotas, currentYear]);
+
+  const filteredMembers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const list = term
+      ? members.filter((m) =>
+          m.nomeCompleto.toLowerCase().includes(term) || m.numeroAssociado.includes(term)
+        )
+      : members;
+    return list.slice(-5).reverse();
+  }, [members, search]);
+
+  const upcomingActivities = activities.slice(0, 3);
+
+  if (current !== 'dashboard') {
+    return (
+      <div className="min-h-screen flex bg-brand-950">
+        <AdminSidebar current={current} onNavigate={setCurrent} onLogout={handleLogout} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        <div className="flex-1 flex items-center justify-center p-8">
+          <p className="text-ink-400 text-sm text-center max-w-xs">
+            Esta secção fica pronta numa próxima fase.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex bg-brand-950">
+      <AdminSidebar current={current} onNavigate={setCurrent} onLogout={handleLogout} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+      <div className="flex-1 min-w-0">
+        <header className="sticky top-0 z-20 bg-brand-950/90 backdrop-blur-md border-b border-brand-800/40 px-5 h-16 flex items-center justify-between gap-4">
+          <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-ink-300 hover:text-white">
+            <Menu className="w-5 h-5" />
+          </button>
+          <div className="flex-1 max-w-sm">
+            <SearchBar value={search} onChange={setSearch} placeholder="Pesquisar associados..." />
+          </div>
+          <div className="hidden sm:flex items-center gap-2 shrink-0">
+            <div className="w-9 h-9 rounded-full bg-brand-700 flex items-center justify-center text-xs font-semibold text-gold-200 border border-gold-500/30">
+              A
+            </div>
+            <div className="text-right">
+              <p className="text-xs font-medium text-white leading-none">Admin ACB</p>
+              <p className="text-[10px] text-ink-500 mt-0.5">Administrador</p>
+            </div>
+          </div>
+        </header>
+
+        <main className="p-5 space-y-6">
+          <div>
+            <h1 className="font-serif text-2xl font-semibold text-white">Dashboard</h1>
+            <p className="text-sm text-ink-400 mt-1">Visão geral da Associação Casa do Brasil</p>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <KpiCard label="Associados" value={totalAssociados} icon={Users} />
+            <KpiCard label="Ativos" value={ativos} icon={CreditCard} />
+            <KpiCard label="Quotas Pendentes" value={quotasPendentes} icon={Gift} />
+            <KpiCard label="Próximas Atividades" value={proximasAtividades} icon={CalendarDays} />
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-4">
+            <div className="card-surface p-5">
+              <p className="section-title mb-4">Últimos Associados</p>
+              <div className="space-y-2">
+                {filteredMembers.map((m) => {
+                  const q = quotaByMember.get(m.id);
+                  return (
+                    <div key={m.id} className="flex items-center justify-between py-2 border-b border-brand-800/40 last:border-0">
+                      <div className="min-w-0">
+                        <p className="text-sm text-white truncate">{m.nomeCompleto}</p>
+                        <p className="text-xs text-ink-500">Nº {m.numeroAssociado}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <StatusBadge variant={m.estadoAssociado} size="sm" />
+                        {q && <span className="text-xs text-ink-400">{q.ano}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+                {filteredMembers.length === 0 && (
+                  <p className="text-xs text-ink-500 py-4 text-center">Sem resultados.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="card-surface p-5">
+              <p className="section-title mb-4">Próximas Atividades</p>
+              <div className="space-y-2">
+                {upcomingActivities.map((a) => (
+                  <div key={a.id} className="flex items-center justify-between py-2 border-b border-brand-800/40 last:border-0">
+                    <div className="min-w-0">
+                      <p className="text-sm text-white truncate">{a.titulo}</p>
+                      <p className="text-xs text-ink-500">{a.data} · {a.hora}</p>
+                    </div>
+                    <span className="text-xs text-ink-400 shrink-0">{a.numeroInscritos}/{a.limiteParticipantes}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="card-surface p-5">
+            <p className="section-title mb-4">Ações Rápidas</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: 'Novo Associado', icon: Users },
+                { label: 'Nova Atividade', icon: CalendarDays },
+                { label: 'Novo Benefício', icon: Gift },
+                { label: 'Nova Novidade', icon: BellIcon },
+              ].map(({ label, icon: Icon }) => (
+                <button
+                  key={label}
+                  disabled
+                  title="Disponível numa próxima fase"
+                  className="flex flex-col items-center gap-2 p-4 rounded-xl border border-brand-700/40
+                             text-ink-500 cursor-not-allowed opacity-60"
+                >
+                  <Icon className="w-5 h-5" />
+                  <span className="text-xs text-center">{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+src/App.tsx (atualiza — troca o placeholder de admin pelo dashboard real)
+
+import { useState, useCallback } from 'react';
+import Header from '@/components/Header';
+import BottomNavigation, { type NavPage } from '@/components/BottomNavigation';
+import HomePage from '@/pages/HomePage';
+import CardPage from '@/pages/CardPage';
+import ActivitiesPage from '@/pages/ActivitiesPage';
+import BenefitsPage from '@/pages/BenefitsPage';
+import ProfilePage from '@/pages/ProfilePage';
+import LoginPage from '@/pages/LoginPage';
+import AdminDashboardPage from '@/pages/AdminDashboardPage';
+import { AppProvider, useApp } from '@/context/AppContext';
+
+type Page = NavPage | 'profile';
+
+function AppShell() {
+  const { currentUser, getCurrentMember, notifications } = useApp();
+  const [page, setPage] = useState<Page>('home');
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [selectedBenefitId, setSelectedBenefitId] = useState<string | null>(null);
+
+  const handleNavigate = useCallback((p: NavPage) => {
+    setPage(p);
+    setSelectedEventId(null);
+    setSelectedBenefitId(null);
+  }, []);
+
+  const handleProfile = useCallback(() => setPage('profile'), []);
+  const handleBack = useCallback(() => setPage('home'), []);
+
+  const handleEventMore = useCallback((eventId: string) => {
+    setSelectedEventId(eventId);
+    setPage('activities');
+  }, []);
+
+  const handleBenefitOpen = useCallback((benefitId: string) => {
+    setSelectedBenefitId(benefitId);
+    setPage('benefits');
+  }, []);
+
+  const handleNotificationOpen = useCallback((notifId: string) => {
+    const notif = notifications.find((n) => n.id === notifId);
+    if (!notif?.link) return;
+    if (notif.link.startsWith('act-')) handleEventMore(notif.link);
+    else if (notif.link.startsWith('ben-')) handleBenefitOpen(notif.link);
+  }, [notifications, handleEventMore, handleBenefitOpen]);
+
+  if (!currentUser) {
+    return <LoginPage onSuccess={() => setPage('home')} />;
+  }
+
+  if (currentUser.role === 'admin') {
+    return <AdminDashboardPage onLogout={() => setPage('home')} />;
+  }
+
+  const member = getCurrentMember();
+  const showBottomNav = page !== 'profile';
+  const showBack = page === 'card' || page === 'profile';
+  const headerTitle = page === 'card' ? 'Meu Cartão' : page === 'profile' ? 'O Meu Perfil' : undefined;
+
+  return (
+    <div className="page-container flex flex-col">
+      <Header
+        title={headerTitle}
+        showBack={showBack}
+        onBack={handleBack}
+        onProfile={page !== 'profile' ? handleProfile : undefined}
+        avatarInitials={member?.avatarInitials}
+      />
+
+      <main className="flex-1 overflow-y-auto no-scrollbar pb-2">
+        {page === 'home' && (
+          <HomePage
+            onNavigate={handleNavigate}
+            onEventMore={handleEventMore}
+            onBenefitOpen={handleBenefitOpen}
+            onNotificationOpen={handleNotificationOpen}
+            onProfile={handleProfile}
+          />
+        )}
+        {page === 'card' && <CardPage onBack={handleBack} />}
+        {page === 'activities' && (
+          <ActivitiesPage
+            selectedEventId={selectedEventId}
+            onClearSelected={() => setSelectedEventId(null)}
+          />
+        )}
+        {page === 'benefits' && (
+          <BenefitsPage
+            selectedBenefitId={selectedBenefitId}
+            onClearSelected={() => setSelectedBenefitId(null)}
+          />
+        )}
+        {page === 'profile' && <ProfilePage onBack={handleBack} />}
+      </main>
+
+      {showBottomNav && (
+        <BottomNavigation current={page as NavPage} onNavigate={handleNavigate} />
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AppProvider>
+      <AppShell />
+    </AppProvider>
+  );
+}
+
